@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+*.so
+.pytest_cache/
+.coverage
+coverage.xml
+*.pyc
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Forensics artifacts (never commit evidence)
+*.dd
+*.raw
+*.img
+*.e01
+*.aff
+carved/
+images/
+evidence/
+
+# Logs
+*.log
+
+# Docker
+.docker/
+
+# Reports
+reports/
+*.html
+*.json
