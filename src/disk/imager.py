@@ -9,10 +9,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import struct
-import sys
 from datetime import datetime
-from threading import Event, Thread
+from threading import Event
 from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -42,6 +40,8 @@ class DiskImager:
         self.log_path = log_path
         self.verify = verify
         self.progress_callback = progress_callback
+        if not os.path.exists(source):
+            raise FileNotFoundError(f"Source not found: {source}")
         self._cancel = Event()
         self._source_size: int = 0
         self._bytes_read: int = 0
@@ -73,7 +73,7 @@ class DiskImager:
         if not os.path.exists(self.source):
             raise FileNotFoundError(f"Source not found: {self.source}")
 
-        self._source_size = os.path.getsize(self.source)
+        self._source_size = self._measure_source_size()
         logger.info(
             "Starting acquisition: %s -> %s (%d bytes)",
             self.source,
@@ -89,9 +89,9 @@ class DiskImager:
 
         try:
             with open(self.source, "rb") as src, open(self.destination, "wb") as dst:
-                while (
-                    self._bytes_read < self._source_size and not self._cancel.is_set()
-                ):
+                # Read until EOF rather than trusting the size: block devices
+                # can report 0 and media can be larger than first measured.
+                while not self._cancel.is_set():
                     block = src.read(self.BLOCK_SIZE)
                     if not block:
                         break
@@ -137,6 +137,21 @@ class DiskImager:
         logger.info("Acquisition complete: SHA256=%s", sha256_hex)
         return result
 
+    def _measure_source_size(self) -> int:
+        """Size of the source in bytes, including block devices.
+
+        ``os.path.getsize`` reports 0 for block devices such as ``/dev/sdb``;
+        seeking to the end works for both regular files and devices.
+        """
+        size = os.path.getsize(self.source)
+        if size:
+            return size
+        try:
+            with open(self.source, "rb") as f:
+                return f.seek(0, os.SEEK_END)
+        except OSError:
+            return 0
+
     def _verify_image(self, expected_sha256: str, expected_md5: str) -> bool:
         """Verify the destination image matches expected hashes."""
         logger.info("Verifying image integrity...")
@@ -176,7 +191,7 @@ class DiskImager:
             if log_dir and not os.path.exists(log_dir):
                 os.makedirs(log_dir, exist_ok=True)
             with open(self.log_path, "a") as f:
-                f.write(f"=== Forensic Acquisition Log ===\n")
+                f.write("=== Forensic Acquisition Log ===\n")
                 f.write(f"Timestamp: {datetime.utcnow().isoformat()}\n")
                 f.write(f"Source: {result['source']}\n")
                 f.write(f"Destination: {result['destination']}\n")

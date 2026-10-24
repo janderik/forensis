@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 from typing import List, Optional
 
@@ -109,10 +108,10 @@ def network(dump: str) -> None:
         sys.exit(1)
 
 
-@memory.command()
+@memory.command("analyze")
 @click.argument("dump", type=click.Path(exists=True, readable=True))
 @click.option("--json", "json_output", is_flag=True, help="Output as JSON")
-def analyze(dump: str, json_output: bool) -> None:
+def memory_analyze(dump: str, json_output: bool) -> None:
     """Run full analysis on a memory dump (processes, network, modules)."""
     try:
         analyzer = MemoryAnalyzer(dump)
@@ -291,7 +290,7 @@ def build(image: str, output: str) -> None:
         sys.exit(1)
 
 
-@timeline.command()
+@timeline.command("analyze")
 @click.argument("csv_file", type=click.Path(exists=True, readable=True))
 @click.option(
     "--output",
@@ -300,7 +299,7 @@ def build(image: str, output: str) -> None:
     show_default=True,
     help="Output JSON path",
 )
-def analyze(csv_file: str, output: str) -> None:
+def timeline_analyze(csv_file: str, output: str) -> None:
     """Analyze a timeline CSV for anomalies."""
     try:
         entries = TimelineBuilder.load_csv(csv_file)

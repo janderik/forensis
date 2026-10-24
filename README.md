@@ -1,8 +1,8 @@
 # Forensis 🔍
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![CI](https://github.com/forensis/forensis/actions/workflows/ci.yml/badge.svg)](https://github.com/forensis/forensis/actions/workflows/ci.yml)
+[![CI](https://github.com/janderik/forensis/actions/workflows/ci.yml/badge.svg)](https://github.com/janderik/forensis/actions/workflows/ci.yml)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Imports: isort](https://img.shields.io/badge/imports-isort-%231674b1.svg)](https://pycqa.github.io/isort/)
 
@@ -48,7 +48,7 @@ All operations are **read-only** on source evidence. Imaging acquires data witho
 ### From source
 
 ```bash
-git clone https://github.com/forensis/forensis.git
+git clone https://github.com/janderik/forensis.git
 cd forensis
 pip install -r requirements.txt
 pip install -e .

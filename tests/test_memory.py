@@ -1,7 +1,6 @@
 """Tests for memory analysis modules."""
 
 import struct
-from datetime import datetime, timezone
 
 import pytest
 
@@ -35,7 +34,7 @@ class TestProcessList:
         assert any("explorer.exe" in name.lower() for name in names if name)
 
     def test_pid_extraction_heuristic(self) -> None:
-        data = bytearray(256)
+        data = bytearray(0x200)  # large enough to hold the name at +0x170
         struct.pack_into("<I", data, 0, 1234)  # Potential PID
         struct.pack_into("<I", data, 8, 567)  # Potential PPID
         data[0x170:0x178] = b"cmd.exe\x00"
@@ -159,7 +158,6 @@ class TestMemoryAnalyzer:
         assert len(r1.processes) == len(r2.processes)
 
     def test_permission_error(self, tmp_path) -> None:
-        import stat
 
         dump_file = tmp_path / "noperm.raw"
         dump_file.write_bytes(b"\x00")

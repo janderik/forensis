@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import logging
 import os
-import struct
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -29,13 +28,14 @@ class FileSignature:
 
 # Registry of supported file signatures with magic bytes
 SIGNATURES: List[FileSignature] = [
-    FileSignature("JPEG", "jpg", b"\xff\xd8\xff", b"\xff\xd9", min_size=1024),
+    # min_size ~ smallest structurally valid file, so small thumbnails/icons are kept.
+    FileSignature("JPEG", "jpg", b"\xff\xd8\xff", b"\xff\xd9", min_size=125),
     FileSignature(
         "PNG", "png", b"\x89PNG\r\n\x1a\n", b"IEND\xae\x42\x60\x82", min_size=67
     ),
-    FileSignature("PDF", "pdf", b"%PDF", b"%%EOF", min_size=1024),
+    FileSignature("PDF", "pdf", b"%PDF", b"%%EOF", min_size=256),
     FileSignature("DOCX", "docx", b"PK\x03\x04", b"", min_size=4096),
-    FileSignature("ZIP", "zip", b"PK\x03\x04", b"PK\x05\x06", min_size=256),
+    FileSignature("ZIP", "zip", b"PK\x03\x04", b"PK\x05\x06", min_size=98),
     FileSignature("ELF", "elf", b"\x7fELF", b"", min_size=64),
     FileSignature("GIF", "gif", b"GIF89a", b"\x00\x3b", min_size=64),
     FileSignature("GIF", "gif", b"GIF87a", b"\x00\x3b", min_size=64),
@@ -146,7 +146,7 @@ class FileCarver:
                 }
             )
             file_index += 1
-            offset = end_pos + 1
+            offset = end_pos  # end_pos is exclusive: the next file may start right here
 
         return results
 

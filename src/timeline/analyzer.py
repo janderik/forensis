@@ -6,8 +6,8 @@ import logging
 import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Set, Tuple
+from datetime import datetime, timezone
+from typing import Dict, List, Tuple
 
 from .builder import TimelineEntry
 
@@ -115,35 +115,48 @@ class TimelineAnalyzer:
 
         return anomalies
 
+    # Modified z-score cut-off recommended by Iglewicz & Hoaglin.
+    OUTLIER_THRESHOLD = 3.5
+    BURST_WINDOW_SECONDS = 60
+    BURST_MIN_EVENTS = 10
+
     def _detect_outlier_clusters(self) -> List[Anomaly]:
-        """Detect clusters of events at unusual times or frequencies."""
+        """Detect events far away in time from the bulk of the timeline.
+
+        Uses the modified z-score (median / MAD), which, unlike mean and
+        standard deviation, is not dragged towards the outliers themselves.
+        """
         anomalies: List[Anomaly] = []
         if len(self.entries) < 10:
             return anomalies
 
         epochs = [e.timestamp_epoch for e in self.entries]
-        try:
-            mean = statistics.mean(epochs)
-            stdev = statistics.stdev(epochs)
-        except statistics.StatisticsError:
+        median = statistics.median(epochs)
+        mad = statistics.median(abs(x - median) for x in epochs)
+        if mad == 0:
             return anomalies
 
-        threshold = 2.5
+        threshold = self.OUTLIER_THRESHOLD
         outliers: List[TimelineEntry] = [
-            e for e in self.entries if abs(e.timestamp_epoch - mean) > threshold * stdev
+            e
+            for e in self.entries
+            if 0.6745 * abs(e.timestamp_epoch - median) / mad > threshold
         ]
 
-        if outliers and len(outliers) >= 3:
+        if outliers:
             anomalies.append(
                 Anomaly(
                     type="outlier_cluster",
                     severity="medium",
-                    description=f"Detected {len(outliers)} outlier events beyond {threshold} standard deviations from mean",
+                    description=(
+                        f"Detected {len(outliers)} outlier event(s) with modified "
+                        f"z-score above {threshold}"
+                    ),
                     entries=outliers[:20],
                     details={
                         "outlier_count": len(outliers),
-                        "mean_epoch": mean,
-                        "stdev": stdev,
+                        "median_epoch": median,
+                        "mad": mad,
                         "threshold": threshold,
                     },
                 )
@@ -152,35 +165,38 @@ class TimelineAnalyzer:
         return anomalies
 
     def _detect_high_frequency_events(self) -> List[Anomaly]:
-        """Detect bursts of events in short time windows."""
+        """Detect bursts of events in short time windows (sliding window)."""
         anomalies: List[Anomaly] = []
-        if len(self.entries) < 20:
+        min_events = self.BURST_MIN_EVENTS
+        window = self.BURST_WINDOW_SECONDS
+        if len(self.entries) < min_events:
             return anomalies
 
         sorted_entries = sorted(self.entries, key=lambda e: e.timestamp_epoch)
-        window = 60  # 60-second window
-
-        for i in range(len(sorted_entries)):
-            window_end = sorted_entries[i].timestamp_epoch + window
-            count = sum(
-                1
-                for e in sorted_entries
-                if sorted_entries[i].timestamp_epoch <= e.timestamp_epoch <= window_end
-            )
-            if count >= 10:
+        end = 0
+        for start, first in enumerate(sorted_entries):
+            window_end = first.timestamp_epoch + window
+            end = max(end, start)
+            while (
+                end < len(sorted_entries)
+                and sorted_entries[end].timestamp_epoch <= window_end
+            ):
+                end += 1
+            count = end - start
+            if count >= min_events:
                 anomalies.append(
                     Anomaly(
                         type="high_frequency_burst",
                         severity="medium",
                         description=(
                             f"Burst of {count} events within {window}s window "
-                            f"starting at {sorted_entries[i].timestamp}"
+                            f"starting at {first.timestamp}"
                         ),
-                        entries=sorted_entries[i : i + count][:20],
+                        entries=sorted_entries[start:end][:20],
                         details={
                             "burst_count": count,
                             "window_seconds": window,
-                            "start_time": sorted_entries[i].timestamp,
+                            "start_time": first.timestamp,
                         },
                     )
                 )

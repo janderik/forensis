@@ -7,9 +7,9 @@ dumps for EPROCESS-like structures using heuristic pattern matching.
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -47,6 +47,10 @@ class ProcessList:
         "powershell.exe",
     }
 
+    # EPROCESS.ImageFileName: fixed-size ASCII field (UCHAR[15]).
+    IMAGE_NAME_OFFSET = 0x170
+    IMAGE_NAME_LEN = 15
+
     def __init__(self, data: bytes) -> None:
         if not isinstance(data, bytes):
             raise TypeError("data must be bytes")
@@ -56,7 +60,6 @@ class ProcessList:
     def list_processes(self) -> List[Dict]:
         """Scan memory for process structures and return a list of process dicts."""
         processes: List[Dict] = []
-        seen_names: set = set()
 
         processes.extend(self._scan_peb_structures())
         processes.extend(self._scan_string_patterns())
@@ -75,8 +78,9 @@ class ProcessList:
         """Scan for PEB-like structures in the dump."""
         results: List[Dict] = []
         offset = 0
-        # Scan for potential process structures using heuristics
-        while offset < self._size - 256:
+        # Scan for potential process structures using heuristics. The image
+        # name sits at +0x170, so stop only when it no longer fits.
+        while offset + self.IMAGE_NAME_OFFSET + 4 <= self._size:
             try:
                 maybe_pid = struct.unpack_from("<I", self._data, offset)[0]
                 maybe_ppid = struct.unpack_from("<I", self._data, offset + 8)[0]
@@ -86,8 +90,7 @@ class ProcessList:
                     and 0 <= maybe_ppid <= 65535
                     and maybe_ppid != maybe_pid
                 ):
-                    name_bytes = self._data[offset + 0x170 : offset + 0x1F0]
-                    name = self._extract_string(name_bytes)
+                    name = self._extract_image_name(offset + self.IMAGE_NAME_OFFSET)
 
                     if name and (
                         name.lower().endswith(".exe") or name in self.KNOWN_PROCESSES
@@ -115,12 +118,20 @@ class ProcessList:
         results: List[Dict] = []
 
         for proc_name in self.KNOWN_PROCESSES:
-            name_bytes = proc_name.lower().encode("utf-16-le")
-            pos = 0
-            while pos < self._size:
-                idx = self._data.find(name_bytes, pos)
-                if idx == -1:
-                    break
+            # Memory holds names both as ASCII (EPROCESS) and UTF-16LE (PEB);
+            # search the name as written and in lower case, in both encodings.
+            needles = {
+                variant.encode(encoding)
+                for variant in (proc_name, proc_name.lower())
+                for encoding in ("ascii", "utf-16-le")
+            }
+            hits = sorted(
+                (idx, len(needle))
+                for needle in needles
+                for idx in self._find_all(needle)
+            )
+            for idx, length in hits:
+                name_bytes = self._data[idx : idx + length]
                 context_start = max(0, idx - 64)
                 context = self._data[context_start : idx + len(name_bytes) + 64]
                 pid = self._heuristic_pid(context, idx - context_start)
@@ -136,9 +147,24 @@ class ProcessList:
                         "source": "string_scan",
                     }
                 )
-                pos = idx + len(name_bytes)
 
         return results
+
+    def _find_all(self, needle: bytes) -> List[int]:
+        positions: List[int] = []
+        pos = self._data.find(needle)
+        while pos != -1:
+            positions.append(pos)
+            pos = self._data.find(needle, pos + len(needle))
+        return positions
+
+    def _extract_image_name(self, offset: int) -> str:
+        """Read EPROCESS.ImageFileName (ASCII), falling back to UTF-16LE."""
+        raw = self._data[offset : offset + self.IMAGE_NAME_LEN]
+        ascii_name = raw.split(b"\x00", 1)[0]
+        if len(ascii_name) >= 3 and all(0x20 <= b < 0x7F for b in ascii_name):
+            return ascii_name.decode("ascii").strip()
+        return self._extract_string(self._data[offset : offset + 0x80])
 
     def _extract_string(self, data: bytes) -> str:
         """Extract a null-terminated UTF-16LE string from binary data."""

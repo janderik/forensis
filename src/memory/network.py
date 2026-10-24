@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 import struct
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 
 class NetworkConnections:

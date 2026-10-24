@@ -9,9 +9,9 @@ from __future__ import annotations
 import logging
 import os
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +66,15 @@ class FilesystemNavigator:
         if self._data is None:
             return None
 
-        # Check MBR/VBR for OEM ID at offset 3
+        # NTFS puts its name in the OEM ID (+0x03). FAT volumes carry a vendor
+        # string there ("MSDOS5.0", "mkfs.fat", ...) and the filesystem type
+        # label at +0x36 (FAT12/16) or +0x52 (FAT32).
         for offset in [0, 512, 1024, 2048]:
-            oem = self._data[offset + 3 : offset + 11]
-            if oem in self.SUPPORTED_FS:
-                self._fs_type = self.SUPPORTED_FS[oem]
-                return self._fs_type
+            for label_at in (0x03, 0x36, 0x52):
+                label = self._data[offset + label_at : offset + label_at + 8]
+                if label in self.SUPPORTED_FS:
+                    self._fs_type = self.SUPPORTED_FS[label]
+                    return self._fs_type
 
         # Check for ext* superblock at offset 1024
         ext_magic = (
@@ -138,6 +141,8 @@ class FilesystemNavigator:
         self._load()
         if self._data is None:
             return []
+        if self._fs_type is None:
+            self.identify_filesystem()
 
         if self._fs_type == "NTFS":
             return self._list_ntfs(path)
@@ -281,19 +286,20 @@ class FilesystemNavigator:
             sectors_per_cluster = self._data[0x0D]
             reserved_sectors = struct.unpack_from("<H", self._data, 0x0E)[0]
             num_fats = self._data[0x10]
-            fat_size = struct.unpack_from("<I", self._data, 0x24)[0]  # FAT32
-            if fat_size == 0:
-                fat_size = struct.unpack_from("<H", self._data, 0x16)[0]  # FAT16
-            root_entries = struct.unpack_from("<H", self._data, 0x11)[0]
+            fat_size_16 = struct.unpack_from("<H", self._data, 0x16)[0]
 
-            data_start = reserved_sectors + (num_fats * fat_size)
-            if fat_size > 0x10000:  # FAT32
+            if fat_size_16 != 0:
+                # FAT12/16: fixed root directory right after the FATs.
+                root_sector = reserved_sectors + num_fats * fat_size_16
+                root_offset = root_sector * bytes_per_sector
+            else:
+                # FAT32: BPB_FATSz16 is 0; the root is a cluster chain.
+                fat_size_32 = struct.unpack_from("<I", self._data, 0x24)[0]
                 root_cluster = struct.unpack_from("<I", self._data, 0x2C)[0]
+                data_start = reserved_sectors + num_fats * fat_size_32
                 root_offset = (
                     data_start + (root_cluster - 2) * sectors_per_cluster
                 ) * bytes_per_sector
-            else:
-                root_offset = data_start * bytes_per_sector
 
             return root_offset if root_offset < len(self._data) else 0
         except (struct.error, ValueError):

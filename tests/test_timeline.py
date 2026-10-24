@@ -1,9 +1,6 @@
 """Tests for timeline analysis modules."""
 
 import csv
-import os
-import struct
-from datetime import datetime, timezone
 
 import pytest
 
@@ -259,6 +256,21 @@ class TestTimelineAnalyzer:
         report = analyzer.analyze()
         outliers = [a for a in report.anomalies if a.type == "outlier_cluster"]
         assert len(outliers) > 0
+
+    def test_no_outliers_in_evenly_spaced_timeline(self) -> None:
+        base = 1704067200.0
+        entries = [
+            TimelineEntry(
+                timestamp="t",
+                timestamp_epoch=base + i * 3600,
+                source="s",
+                event_type="e",
+                description=f"e{i}",
+            )
+            for i in range(48)
+        ]
+        report = TimelineAnalyzer(entries).analyze()
+        assert not [a for a in report.anomalies if a.type == "outlier_cluster"]
 
     def test_source_breakdown(self) -> None:
         entries = [
