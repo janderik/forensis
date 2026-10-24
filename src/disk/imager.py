@@ -74,7 +74,12 @@ class DiskImager:
             raise FileNotFoundError(f"Source not found: {self.source}")
 
         self._source_size = os.path.getsize(self.source)
-        logger.info("Starting acquisition: %s -> %s (%d bytes)", self.source, self.destination, self._source_size)
+        logger.info(
+            "Starting acquisition: %s -> %s (%d bytes)",
+            self.source,
+            self.destination,
+            self._source_size,
+        )
 
         dest_dir = os.path.dirname(os.path.abspath(self.destination))
         if dest_dir and not os.path.exists(dest_dir):
@@ -84,7 +89,9 @@ class DiskImager:
 
         try:
             with open(self.source, "rb") as src, open(self.destination, "wb") as dst:
-                while self._bytes_read < self._source_size and not self._cancel.is_set():
+                while (
+                    self._bytes_read < self._source_size and not self._cancel.is_set()
+                ):
                     block = src.read(self.BLOCK_SIZE)
                     if not block:
                         break
@@ -98,7 +105,11 @@ class DiskImager:
             raise ImagingError(f"I/O error during acquisition: {e}")
 
         if self._cancel.is_set():
-            logger.warning("Acquisition cancelled at %d/%d bytes", self._bytes_read, self._source_size)
+            logger.warning(
+                "Acquisition cancelled at %d/%d bytes",
+                self._bytes_read,
+                self._source_size,
+            )
             self._cleanup_partial()
             raise ImagingError("Acquisition cancelled by user")
 
@@ -139,7 +150,10 @@ class DiskImager:
                         break
                     sha256.update(block)
                     md5.update(block)
-            return sha256.hexdigest() == expected_sha256 and md5.hexdigest() == expected_md5
+            return (
+                sha256.hexdigest() == expected_sha256
+                and md5.hexdigest() == expected_md5
+            )
         except Exception as e:
             logger.error("Verification failed: %s", e)
             return False

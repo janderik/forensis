@@ -97,12 +97,14 @@ class MemoryAnalyzer:
                 pos = chunk.find(sig)
                 while pos != -1:
                     abs_pos = offset + pos
-                    modules.append({
-                        "offset": hex(abs_pos),
-                        "signature": sig.hex(),
-                        "description": f"Potential {desc} module",
-                        "size": self._size - abs_pos,
-                    })
+                    modules.append(
+                        {
+                            "offset": hex(abs_pos),
+                            "signature": sig.hex(),
+                            "description": f"Potential {desc} module",
+                            "size": self._size - abs_pos,
+                        }
+                    )
                     pos = chunk.find(sig, pos + 1)
             offset += chunk_size
 

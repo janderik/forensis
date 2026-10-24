@@ -74,11 +74,13 @@ class ReportGenerator:
 
     def add_hash(self, alg: str, value: str, file_path: str = "") -> None:
         """Add a hash entry to the report."""
-        self._hashes.append({
-            "algorithm": alg,
-            "value": value,
-            "file_path": file_path,
-        })
+        self._hashes.append(
+            {
+                "algorithm": alg,
+                "value": value,
+                "file_path": file_path,
+            }
+        )
 
     @property
     def data(self) -> Dict[str, Any]:

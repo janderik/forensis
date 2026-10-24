@@ -5,7 +5,7 @@ import struct
 
 import pytest
 
-from src.disk.carver import FileCarver, FileSignature, SIGNATURES
+from src.disk.carver import SIGNATURES, FileCarver, FileSignature
 from src.disk.filesystem import FilesystemNavigator
 from src.disk.imager import DiskImager
 
@@ -43,7 +43,7 @@ class TestDiskImager:
 
     def test_large_block_acquisition(self, tmp_path) -> None:
         source = tmp_path / "large.bin"
-        source.write_bytes(b"\xAB" * (4 * 1024 * 1024 + 13))  # > 4MB
+        source.write_bytes(b"\xab" * (4 * 1024 * 1024 + 13))  # > 4MB
 
         dest = tmp_path / "large.dd"
         imager = DiskImager(str(source), str(dest))
@@ -53,7 +53,7 @@ class TestDiskImager:
 
     def test_cancellation(self, tmp_path) -> None:
         source = tmp_path / "cancel_source.bin"
-        source.write_bytes(b"\xBB" * (8 * 1024 * 1024))
+        source.write_bytes(b"\xbb" * (8 * 1024 * 1024))
         dest = tmp_path / "cancel.dd"
         imager = DiskImager(str(source), str(dest), verify=False)
 
@@ -216,7 +216,7 @@ class TestFilesystemNavigator:
         image = tmp_path / "ntfs.img"
         data = bytearray(512)
         data[3:11] = b"NTFS    "
-        data[510:512] = b"\x55\xAA"
+        data[510:512] = b"\x55\xaa"
         image.write_bytes(data)
         nav = FilesystemNavigator(str(image))
         fs = nav.identify_filesystem()
@@ -226,7 +226,7 @@ class TestFilesystemNavigator:
         image = tmp_path / "fat32.img"
         data = bytearray(512)
         data[3:11] = b"FAT32   "
-        data[510:512] = b"\x55\xAA"
+        data[510:512] = b"\x55\xaa"
         image.write_bytes(data)
         nav = FilesystemNavigator(str(image))
         fs = nav.identify_filesystem()
@@ -251,7 +251,7 @@ class TestFilesystemNavigator:
 
     def test_fallback_listing(self, tmp_path) -> None:
         image = tmp_path / "fallback.img"
-        data = b"filename=\"report.pdf\" " * 10 + b"Content-Type: application/pdf"
+        data = b'filename="report.pdf" ' * 10 + b"Content-Type: application/pdf"
         image.write_bytes(data)
         nav = FilesystemNavigator(str(image))
         entries = nav.list_directory("/")
@@ -260,7 +260,7 @@ class TestFilesystemNavigator:
     def test_mbr_partition_table(self, tmp_path) -> None:
         image = tmp_path / "mbr.img"
         data = bytearray(512)
-        data[510:512] = b"\x55\xAA"
+        data[510:512] = b"\x55\xaa"
         # Partition 1: type 0x07 (NTFS)
         data[446 + 4] = 0x07
         image.write_bytes(data)

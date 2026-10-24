@@ -48,15 +48,17 @@ class NetworkConnections:
                 state = self._tcp_state(state_byte)
 
                 if self._is_valid_port(local_port):
-                    results.append({
-                        "protocol": "TCP",
-                        "local_ip": local_ip,
-                        "local_port": local_port,
-                        "remote_ip": remote_ip,
-                        "remote_port": remote_port,
-                        "state": state,
-                        "offset": hex(offset),
-                    })
+                    results.append(
+                        {
+                            "protocol": "TCP",
+                            "local_ip": local_ip,
+                            "local_port": local_port,
+                            "remote_ip": remote_ip,
+                            "remote_port": remote_port,
+                            "state": state,
+                            "offset": hex(offset),
+                        }
+                    )
             except (struct.error, IndexError):
                 pass
             offset += stride
@@ -78,16 +80,18 @@ class NetworkConnections:
 
             parts = ip_str.split(".")
             if all(0 <= int(p) <= 255 for p in parts):
-                results.append({
-                    "protocol": "UNKNOWN",
-                    "local_ip": ip_str,
-                    "local_port": port,
-                    "remote_ip": "",
-                    "remote_port": 0,
-                    "state": "UNKNOWN",
-                    "offset": hex(match.start()),
-                    "source": "string_pattern",
-                })
+                results.append(
+                    {
+                        "protocol": "UNKNOWN",
+                        "local_ip": ip_str,
+                        "local_port": port,
+                        "remote_ip": "",
+                        "remote_port": 0,
+                        "state": "UNKNOWN",
+                        "offset": hex(match.start()),
+                        "source": "string_pattern",
+                    }
+                )
 
         return results
 

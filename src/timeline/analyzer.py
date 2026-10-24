@@ -58,7 +58,9 @@ class TimelineAnalyzer:
         report.time_span_hours = (max(epochs) - min(epochs)) / 3600 if epochs else 0.0
 
         report.statistics = {
-            "events_per_hour": round(len(self.entries) / max(report.time_span_hours, 0.01), 2),
+            "events_per_hour": round(
+                len(self.entries) / max(report.time_span_hours, 0.01), 2
+            ),
             "unique_sources": len(report.source_breakdown),
             "unique_types": len(report.event_type_breakdown),
             "timespan_hours": round(report.time_span_hours, 2),
@@ -82,7 +84,10 @@ class TimelineAnalyzer:
         gaps: List[Tuple[float, TimelineEntry, TimelineEntry]] = []
 
         for i in range(1, len(sorted_entries)):
-            gap = sorted_entries[i].timestamp_epoch - sorted_entries[i - 1].timestamp_epoch
+            gap = (
+                sorted_entries[i].timestamp_epoch
+                - sorted_entries[i - 1].timestamp_epoch
+            )
             if gap > 3600:  # More than 1 hour
                 gaps.append((gap, sorted_entries[i - 1], sorted_entries[i]))
 
@@ -90,21 +95,23 @@ class TimelineAnalyzer:
             # Report the largest gaps
             gaps.sort(key=lambda g: g[0], reverse=True)
             for gap, before, after in gaps[:5]:
-                anomalies.append(Anomaly(
-                    type="time_gap",
-                    severity="high" if gap > 86400 else "medium",
-                    description=(
-                        f"Time gap of {gap / 3600:.1f} hours detected between "
-                        f"[{before.timestamp}] ({before.description[:40]}) and "
-                        f"[{after.timestamp}] ({after.description[:40]})"
-                    ),
-                    details={
-                        "gap_seconds": gap,
-                        "gap_hours": round(gap / 3600, 2),
-                        "before": before.timestamp,
-                        "after": after.timestamp,
-                    },
-                ))
+                anomalies.append(
+                    Anomaly(
+                        type="time_gap",
+                        severity="high" if gap > 86400 else "medium",
+                        description=(
+                            f"Time gap of {gap / 3600:.1f} hours detected between "
+                            f"[{before.timestamp}] ({before.description[:40]}) and "
+                            f"[{after.timestamp}] ({after.description[:40]})"
+                        ),
+                        details={
+                            "gap_seconds": gap,
+                            "gap_hours": round(gap / 3600, 2),
+                            "before": before.timestamp,
+                            "after": after.timestamp,
+                        },
+                    )
+                )
 
         return anomalies
 
@@ -123,23 +130,24 @@ class TimelineAnalyzer:
 
         threshold = 2.5
         outliers: List[TimelineEntry] = [
-            e for e in self.entries
-            if abs(e.timestamp_epoch - mean) > threshold * stdev
+            e for e in self.entries if abs(e.timestamp_epoch - mean) > threshold * stdev
         ]
 
         if outliers and len(outliers) >= 3:
-            anomalies.append(Anomaly(
-                type="outlier_cluster",
-                severity="medium",
-                description=f"Detected {len(outliers)} outlier events beyond {threshold} standard deviations from mean",
-                entries=outliers[:20],
-                details={
-                    "outlier_count": len(outliers),
-                    "mean_epoch": mean,
-                    "stdev": stdev,
-                    "threshold": threshold,
-                },
-            ))
+            anomalies.append(
+                Anomaly(
+                    type="outlier_cluster",
+                    severity="medium",
+                    description=f"Detected {len(outliers)} outlier events beyond {threshold} standard deviations from mean",
+                    entries=outliers[:20],
+                    details={
+                        "outlier_count": len(outliers),
+                        "mean_epoch": mean,
+                        "stdev": stdev,
+                        "threshold": threshold,
+                    },
+                )
+            )
 
         return anomalies
 
@@ -155,24 +163,27 @@ class TimelineAnalyzer:
         for i in range(len(sorted_entries)):
             window_end = sorted_entries[i].timestamp_epoch + window
             count = sum(
-                1 for e in sorted_entries
+                1
+                for e in sorted_entries
                 if sorted_entries[i].timestamp_epoch <= e.timestamp_epoch <= window_end
             )
             if count >= 10:
-                anomalies.append(Anomaly(
-                    type="high_frequency_burst",
-                    severity="medium",
-                    description=(
-                        f"Burst of {count} events within {window}s window "
-                        f"starting at {sorted_entries[i].timestamp}"
-                    ),
-                    entries=sorted_entries[i : i + count][:20],
-                    details={
-                        "burst_count": count,
-                        "window_seconds": window,
-                        "start_time": sorted_entries[i].timestamp,
-                    },
-                ))
+                anomalies.append(
+                    Anomaly(
+                        type="high_frequency_burst",
+                        severity="medium",
+                        description=(
+                            f"Burst of {count} events within {window}s window "
+                            f"starting at {sorted_entries[i].timestamp}"
+                        ),
+                        entries=sorted_entries[i : i + count][:20],
+                        details={
+                            "burst_count": count,
+                            "window_seconds": window,
+                            "start_time": sorted_entries[i].timestamp,
+                        },
+                    )
+                )
                 break  # Report the first burst found
 
         return anomalies
@@ -192,13 +203,18 @@ class TimelineAnalyzer:
                 continue
 
         if len(unusual) >= 5:
-            anomalies.append(Anomaly(
-                type="unusual_hours",
-                severity="low",
-                description=f"{len(unusual)} events occurred outside normal hours (06:00-22:00 UTC)",
-                entries=unusual[:15],
-                details={"event_count": len(unusual), "time_window": "00:00-06:00 & 22:00-24:00 UTC"},
-            ))
+            anomalies.append(
+                Anomaly(
+                    type="unusual_hours",
+                    severity="low",
+                    description=f"{len(unusual)} events occurred outside normal hours (06:00-22:00 UTC)",
+                    entries=unusual[:15],
+                    details={
+                        "event_count": len(unusual),
+                        "time_window": "00:00-06:00 & 22:00-24:00 UTC",
+                    },
+                )
+            )
 
         return anomalies
 
@@ -213,17 +229,19 @@ class TimelineAnalyzer:
         for ts, entries in ts_counts.items():
             if len(entries) >= 5:
                 descriptions = [e.description[:50] for e in entries[:10]]
-                anomalies.append(Anomaly(
-                    type="duplicate_timestamp",
-                    severity="low" if len(entries) < 20 else "medium",
-                    description=f"{len(entries)} events share identical timestamp: {ts}",
-                    entries=entries[:10],
-                    details={
-                        "timestamp": ts,
-                        "count": len(entries),
-                        "sample_descriptions": descriptions,
-                    },
-                ))
+                anomalies.append(
+                    Anomaly(
+                        type="duplicate_timestamp",
+                        severity="low" if len(entries) < 20 else "medium",
+                        description=f"{len(entries)} events share identical timestamp: {ts}",
+                        entries=entries[:10],
+                        details={
+                            "timestamp": ts,
+                            "count": len(entries),
+                            "sample_descriptions": descriptions,
+                        },
+                    )
+                )
 
         return anomalies
 

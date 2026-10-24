@@ -31,9 +31,20 @@ class ProcessList:
 
     # Common Windows process names for validation
     KNOWN_PROCESSES = {
-        "System", "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe",
-        "services.exe", "lsass.exe", "lsm.exe", "svchost.exe", "spoolsv.exe",
-        "explorer.exe", "taskmgr.exe", "cmd.exe", "powershell.exe",
+        "System",
+        "smss.exe",
+        "csrss.exe",
+        "wininit.exe",
+        "winlogon.exe",
+        "services.exe",
+        "lsass.exe",
+        "lsm.exe",
+        "svchost.exe",
+        "spoolsv.exe",
+        "explorer.exe",
+        "taskmgr.exe",
+        "cmd.exe",
+        "powershell.exe",
     }
 
     def __init__(self, data: bytes) -> None:
@@ -70,21 +81,29 @@ class ProcessList:
                 maybe_pid = struct.unpack_from("<I", self._data, offset)[0]
                 maybe_ppid = struct.unpack_from("<I", self._data, offset + 8)[0]
 
-                if 4 <= maybe_pid <= 65535 and 0 <= maybe_ppid <= 65535 and maybe_ppid != maybe_pid:
+                if (
+                    4 <= maybe_pid <= 65535
+                    and 0 <= maybe_ppid <= 65535
+                    and maybe_ppid != maybe_pid
+                ):
                     name_bytes = self._data[offset + 0x170 : offset + 0x1F0]
                     name = self._extract_string(name_bytes)
 
-                    if name and (name.lower().endswith(".exe") or name in self.KNOWN_PROCESSES):
-                        results.append({
-                            "pid": maybe_pid,
-                            "ppid": maybe_ppid,
-                            "name": name,
-                            "offset": hex(offset),
-                            "create_time": self._parse_timestamp(offset + 0x68),
-                            "exit_time": self._parse_timestamp(offset + 0x70),
-                            "session_id": self._read_uint32(offset + 0x200),
-                            "source": "peb_scan",
-                        })
+                    if name and (
+                        name.lower().endswith(".exe") or name in self.KNOWN_PROCESSES
+                    ):
+                        results.append(
+                            {
+                                "pid": maybe_pid,
+                                "ppid": maybe_ppid,
+                                "name": name,
+                                "offset": hex(offset),
+                                "create_time": self._parse_timestamp(offset + 0x68),
+                                "exit_time": self._parse_timestamp(offset + 0x70),
+                                "session_id": self._read_uint32(offset + 0x200),
+                                "source": "peb_scan",
+                            }
+                        )
             except (struct.error, ValueError):
                 pass
             offset += 4
@@ -105,16 +124,18 @@ class ProcessList:
                 context_start = max(0, idx - 64)
                 context = self._data[context_start : idx + len(name_bytes) + 64]
                 pid = self._heuristic_pid(context, idx - context_start)
-                results.append({
-                    "pid": pid if pid else 0,
-                    "ppid": 0,
-                    "name": proc_name,
-                    "offset": hex(idx),
-                    "create_time": None,
-                    "exit_time": None,
-                    "session_id": 0,
-                    "source": "string_scan",
-                })
+                results.append(
+                    {
+                        "pid": pid if pid else 0,
+                        "ppid": 0,
+                        "name": proc_name,
+                        "offset": hex(idx),
+                        "create_time": None,
+                        "exit_time": None,
+                        "session_id": 0,
+                        "source": "string_scan",
+                    }
+                )
                 pos = idx + len(name_bytes)
 
         return results
