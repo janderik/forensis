@@ -9,9 +9,9 @@ from __future__ import annotations
 import logging
 import os
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -66,15 +66,22 @@ class FilesystemNavigator:
         if self._data is None:
             return None
 
-        # Check MBR/VBR for OEM ID at offset 3
+        # NTFS puts its name in the OEM ID (+0x03). FAT volumes carry a vendor
+        # string there ("MSDOS5.0", "mkfs.fat", ...) and the filesystem type
+        # label at +0x36 (FAT12/16) or +0x52 (FAT32).
         for offset in [0, 512, 1024, 2048]:
-            oem = self._data[offset + 3 : offset + 11]
-            if oem in self.SUPPORTED_FS:
-                self._fs_type = self.SUPPORTED_FS[oem]
-                return self._fs_type
+            for label_at in (0x03, 0x36, 0x52):
+                label = self._data[offset + label_at : offset + label_at + 8]
+                if label in self.SUPPORTED_FS:
+                    self._fs_type = self.SUPPORTED_FS[label]
+                    return self._fs_type
 
         # Check for ext* superblock at offset 1024
-        ext_magic = struct.unpack_from("<H", self._data, 1080)[0] if len(self._data) > 1082 else 0
+        ext_magic = (
+            struct.unpack_from("<H", self._data, 1080)[0]
+            if len(self._data) > 1082
+            else 0
+        )
         if ext_magic == 0xEF53:
             self._fs_type = self._detect_ext_version()
             return self._fs_type
@@ -103,7 +110,7 @@ class FilesystemNavigator:
         """Check MBR partition table for known filesystem types."""
         if self._data is None or len(self._data) < 512:
             return None
-        if self._data[510:512] != b"\x55\xAA":
+        if self._data[510:512] != b"\x55\xaa":
             return None
 
         for i in range(4):
@@ -112,8 +119,12 @@ class FilesystemNavigator:
                 break
             part_type = self._data[offset + 4]
             type_map = {
-                0x01: "FAT12", 0x04: "FAT16", 0x06: "FAT16B",
-                0x07: "NTFS", 0x0B: "FAT32", 0x0C: "FAT32",
+                0x01: "FAT12",
+                0x04: "FAT16",
+                0x06: "FAT16B",
+                0x07: "NTFS",
+                0x0B: "FAT32",
+                0x0C: "FAT32",
                 0x83: "ext2/3/4",
             }
             if part_type in type_map:
@@ -130,6 +141,8 @@ class FilesystemNavigator:
         self._load()
         if self._data is None:
             return []
+        if self._fs_type is None:
+            self.identify_filesystem()
 
         if self._fs_type == "NTFS":
             return self._list_ntfs(path)
@@ -158,17 +171,35 @@ class FilesystemNavigator:
             if self._data[offset : offset + 4] == b"FILE":
                 try:
                     name = self._extract_ntfs_name(offset)
-                    if name and name not in (".", "..", "$MFT", "$MFTMirr", "$LogFile", "$Volume", "$AttrDef", "$Bitmap", "$Boot", "$BadClus", "$Secure", "$UpCase", "$Extend"):
+                    if name and name not in (
+                        ".",
+                        "..",
+                        "$MFT",
+                        "$MFTMirr",
+                        "$LogFile",
+                        "$Volume",
+                        "$AttrDef",
+                        "$Bitmap",
+                        "$Boot",
+                        "$BadClus",
+                        "$Secure",
+                        "$UpCase",
+                        "$Extend",
+                    ):
                         flags = struct.unpack_from("<H", self._data, offset + 0x16)[0]
                         is_dir = bool(flags & 0x01)
-                        real_size = struct.unpack_from("<Q", self._data, offset + 0x30)[0]
-                        entries.append(FileEntry(
-                            name=name,
-                            path=f"{path}{name}",
-                            size=real_size,
-                            is_directory=is_dir,
-                            permissions="rw-r--r--",
-                        ))
+                        real_size = struct.unpack_from("<Q", self._data, offset + 0x30)[
+                            0
+                        ]
+                        entries.append(
+                            FileEntry(
+                                name=name,
+                                path=f"{path}{name}",
+                                size=real_size,
+                                is_directory=is_dir,
+                                permissions="rw-r--r--",
+                            )
+                        )
                         record_count += 1
                 except (struct.error, ValueError):
                     pass
@@ -190,7 +221,9 @@ class FilesystemNavigator:
                 if attr_type == 0xFFFFFFFF:
                     break
                 if attr_type == 0x30:  # $FILE_NAME
-                    name_len = self._data[pos + 0x58] if pos + 0x58 < len(self._data) else 0
+                    name_len = (
+                        self._data[pos + 0x58] if pos + 0x58 < len(self._data) else 0
+                    )
                     name_offset = pos + 0x5A
                     if name_len > 0 and name_offset + name_len * 2 <= len(self._data):
                         raw = self._data[name_offset : name_offset + name_len * 2]
@@ -227,16 +260,18 @@ class FilesystemNavigator:
             name = self._parse_fat_name(entry)
             if name and name not in (".", ".."):
                 size = struct.unpack_from("<I", entry, 0x1C)[0]
-                entries.append(FileEntry(
-                    name=name,
-                    path=f"{path}{name}",
-                    size=size,
-                    is_directory=bool(attr & 0x10),
-                    created=self._parse_fat_datetime(entry, 0x10),
-                    modified=self._parse_fat_datetime(entry, 0x16),
-                    accessed=self._parse_fat_date(entry, 0x12),
-                    permissions="rw-r--r--",
-                ))
+                entries.append(
+                    FileEntry(
+                        name=name,
+                        path=f"{path}{name}",
+                        size=size,
+                        is_directory=bool(attr & 0x10),
+                        created=self._parse_fat_datetime(entry, 0x10),
+                        modified=self._parse_fat_datetime(entry, 0x16),
+                        accessed=self._parse_fat_date(entry, 0x12),
+                        permissions="rw-r--r--",
+                    )
+                )
             offset += 32
 
         return entries
@@ -251,17 +286,20 @@ class FilesystemNavigator:
             sectors_per_cluster = self._data[0x0D]
             reserved_sectors = struct.unpack_from("<H", self._data, 0x0E)[0]
             num_fats = self._data[0x10]
-            fat_size = struct.unpack_from("<I", self._data, 0x24)[0]  # FAT32
-            if fat_size == 0:
-                fat_size = struct.unpack_from("<H", self._data, 0x16)[0]  # FAT16
-            root_entries = struct.unpack_from("<H", self._data, 0x11)[0]
+            fat_size_16 = struct.unpack_from("<H", self._data, 0x16)[0]
 
-            data_start = reserved_sectors + (num_fats * fat_size)
-            if fat_size > 0x10000:  # FAT32
-                root_cluster = struct.unpack_from("<I", self._data, 0x2C)[0]
-                root_offset = (data_start + (root_cluster - 2) * sectors_per_cluster) * bytes_per_sector
+            if fat_size_16 != 0:
+                # FAT12/16: fixed root directory right after the FATs.
+                root_sector = reserved_sectors + num_fats * fat_size_16
+                root_offset = root_sector * bytes_per_sector
             else:
-                root_offset = data_start * bytes_per_sector
+                # FAT32: BPB_FATSz16 is 0; the root is a cluster chain.
+                fat_size_32 = struct.unpack_from("<I", self._data, 0x24)[0]
+                root_cluster = struct.unpack_from("<I", self._data, 0x2C)[0]
+                data_start = reserved_sectors + num_fats * fat_size_32
+                root_offset = (
+                    data_start + (root_cluster - 2) * sectors_per_cluster
+                ) * bytes_per_sector
 
             return root_offset if root_offset < len(self._data) else 0
         except (struct.error, ValueError):
@@ -322,7 +360,9 @@ class FilesystemNavigator:
                 # Read block pointers from root inode
                 block_offset = root_inode_offset + 40  # direct block pointer 0
                 for i in range(12):
-                    block_ptr = struct.unpack_from("<I", self._data, block_offset + i * 4)[0]
+                    block_ptr = struct.unpack_from(
+                        "<I", self._data, block_offset + i * 4
+                    )[0]
                     if block_ptr == 0:
                         continue
                     dir_block_offset = block_ptr * block_size
@@ -354,12 +394,14 @@ class FilesystemNavigator:
                 name_bytes = self._data[pos + 8 : pos + 8 + name_len]
                 name = name_bytes.decode("utf-8", errors="replace").rstrip("\x00")
                 if name and name not in (".", ".."):
-                    entries.append(FileEntry(
-                        name=name,
-                        inode=inode,
-                        is_directory=file_type == 2,
-                        permissions=self._ext_permissions(inode),
-                    ))
+                    entries.append(
+                        FileEntry(
+                            name=name,
+                            inode=inode,
+                            is_directory=file_type == 2,
+                            permissions=self._ext_permissions(inode),
+                        )
+                    )
                 pos += rec_len
             except (struct.error, ValueError, IndexError):
                 break
@@ -389,7 +431,7 @@ class FilesystemNavigator:
 
         patterns = [
             b"Content-Type: application/",
-            b"filename=\"",
+            b'filename="',
             b"Filename: ",
         ]
         seen: Set[str] = set()
@@ -403,12 +445,14 @@ class FilesystemNavigator:
                 for match in self._extract_filenames(snippet):
                     if match not in seen:
                         seen.add(match)
-                        entries.append(FileEntry(
-                            name=match,
-                            path=match,
-                            size=0,
-                            is_directory=False,
-                        ))
+                        entries.append(
+                            FileEntry(
+                                name=match,
+                                path=match,
+                                size=0,
+                                is_directory=False,
+                            )
+                        )
                 offset = pos + 1
         return entries
 
@@ -419,7 +463,8 @@ class FilesystemNavigator:
         try:
             text = data.decode("utf-8", errors="ignore")
             import re
-            matches = re.findall(r'[\w\-\.]+\.\w{2,4}', text)
+
+            matches = re.findall(r"[\w\-\.]+\.\w{2,4}", text)
             names.extend(matches[:5])
         except Exception:
             pass

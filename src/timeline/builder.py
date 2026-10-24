@@ -9,9 +9,9 @@ import logging
 import os
 import re
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set, Tuple
+from typing import List, Optional, Set, Tuple
 
 from dateutil import parser as dateparser
 
@@ -35,19 +35,20 @@ class TimelineEntry:
 class TimelineBuilder:
     """Builds forensic timelines from disk images and metadata sources."""
 
+    # Byte patterns: they are matched directly against the raw image data.
     TIMESTAMP_PATTERNS = [
         # ISO 8601
         re.compile(
-            r"(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)"
+            rb"(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)"
         ),
         # Windows event log style
-        re.compile(r"(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})"),
+        re.compile(rb"(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})"),
         # US style
-        re.compile(r"(\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})"),
+        re.compile(rb"(\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})"),
         # Linux syslog
-        re.compile(r"(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})"),
+        re.compile(rb"(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})"),
         # FILETIME hex
-        re.compile(r"(0x[0-9a-fA-F]{16})"),
+        re.compile(rb"(0x[0-9a-fA-F]{16})"),
     ]
 
     # Common Windows event log sources to scan for
@@ -126,16 +127,22 @@ class TimelineBuilder:
                                 epoch = self._parse_filetime(stdinfo_offset + ts_offset)
                                 if epoch is not None:
                                     try:
-                                        dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
-                                        entries.append(TimelineEntry(
-                                            timestamp=dt.strftime("%Y-%m-%d %H:%M:%S UTC"),
-                                            timestamp_epoch=epoch,
-                                            source="NTFS",
-                                            event_type=label,
-                                            description=f"File {label}: {name}",
-                                            path=name,
-                                            size=self._read_mft_size(offset),
-                                        ))
+                                        dt = datetime.fromtimestamp(
+                                            epoch, tz=timezone.utc
+                                        )
+                                        entries.append(
+                                            TimelineEntry(
+                                                timestamp=dt.strftime(
+                                                    "%Y-%m-%d %H:%M:%S UTC"
+                                                ),
+                                                timestamp_epoch=epoch,
+                                                source="NTFS",
+                                                event_type=label,
+                                                description=f"File {label}: {name}",
+                                                path=name,
+                                                size=self._read_mft_size(offset),
+                                            )
+                                        )
                                     except (OSError, ValueError, OverflowError):
                                         pass
             except (struct.error, ValueError, IndexError):
@@ -160,13 +167,15 @@ class TimelineBuilder:
                 text = context.decode("utf-16-le", errors="replace")
                 ts = self._find_date_in_text(text)
                 if ts:
-                    entries.append(TimelineEntry(
-                        timestamp=ts.strftime("%Y-%m-%d %H:%M:%S UTC"),
-                        timestamp_epoch=ts.timestamp(),
-                        source=source.decode("ascii", errors="replace"),
-                        event_type="event_log",
-                        description=f"Event log entry: {text[:80].strip()}",
-                    ))
+                    entries.append(
+                        TimelineEntry(
+                            timestamp=ts.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                            timestamp_epoch=ts.timestamp(),
+                            source=source.decode("ascii", errors="replace"),
+                            event_type="event_log",
+                            description=f"Event log entry: {text[:80].strip()}",
+                        )
+                    )
                 pos = idx + 1
 
         return entries
@@ -190,7 +199,7 @@ class TimelineBuilder:
                     if ts_str.startswith("0x"):
                         # Parse as Windows FILETIME hex
                         filetime = int(ts_str, 16)
-                        if filetime == 0 or filetime > 0x7FFFFFFFFFFF:
+                        if filetime == 0 or filetime > 0x7FFFFFFFFFFFFFFF:
                             continue
                         epoch = filetime / 10_000_000 - 11644473600
                         if epoch < 0 or epoch > 4102444800:
@@ -206,13 +215,15 @@ class TimelineBuilder:
                             dt = dt.replace(tzinfo=timezone.utc)
 
                     epoch = dt.timestamp()
-                    entries.append(TimelineEntry(
-                        timestamp=dt.strftime("%Y-%m-%d %H:%M:%S UTC"),
-                        timestamp_epoch=epoch,
-                        source="string",
-                        event_type="timestamp",
-                        description=f"Embedded timestamp: {ts_str}",
-                    ))
+                    entries.append(
+                        TimelineEntry(
+                            timestamp=dt.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                            timestamp_epoch=epoch,
+                            source="string",
+                            event_type="timestamp",
+                            description=f"Embedded timestamp: {ts_str}",
+                        )
+                    )
                 except (ValueError, OverflowError, OSError):
                     continue
 
@@ -245,7 +256,7 @@ class TimelineBuilder:
             return None
         try:
             filetime = struct.unpack_from("<Q", self._data, offset)[0]
-            if filetime == 0 or filetime > 0x7FFFFFFFFFFF:
+            if filetime == 0 or filetime > 0x7FFFFFFFFFFFFFFF:
                 return None
             epoch = filetime / 10_000_000 - 11644473600
             if epoch < 0 or epoch > 4102444800:
@@ -275,7 +286,9 @@ class TimelineBuilder:
                 if attr_type == 0xFFFFFFFF:
                     break
                 if attr_type == 0x30:  # $FILE_NAME
-                    name_len = self._data[pos + 0x58] if pos + 0x58 < len(self._data) else 0
+                    name_len = (
+                        self._data[pos + 0x58] if pos + 0x58 < len(self._data) else 0
+                    )
                     name_offset = pos + 0x5A
                     if name_len > 0 and name_offset + name_len * 2 <= len(self._data):
                         raw = self._data[name_offset : name_offset + name_len * 2]
@@ -318,19 +331,39 @@ class TimelineBuilder:
                 unique.append(e)
         return unique
 
-    def export_csv(self, entries: List[TimelineEntry], output_path: str) -> None:
+    @staticmethod
+    def export_csv(entries: List[TimelineEntry], output_path: str) -> None:
         """Export timeline entries to CSV format."""
         if not entries:
             logger.warning("No timeline entries to export.")
             return
         with open(output_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["Timestamp", "Epoch", "Source", "Type", "Description", "Path", "Size", "Integrity"])
+            writer.writerow(
+                [
+                    "Timestamp",
+                    "Epoch",
+                    "Source",
+                    "Type",
+                    "Description",
+                    "Path",
+                    "Size",
+                    "Integrity",
+                ]
+            )
             for e in entries:
-                writer.writerow([
-                    e.timestamp, f"{e.timestamp_epoch:.6f}", e.source, e.event_type,
-                    e.description, e.path, e.size, e.integrity,
-                ])
+                writer.writerow(
+                    [
+                        e.timestamp,
+                        f"{e.timestamp_epoch:.6f}",
+                        e.source,
+                        e.event_type,
+                        e.description,
+                        e.path,
+                        e.size,
+                        e.integrity,
+                    ]
+                )
         logger.info("Exported %d timeline entries to %s", len(entries), output_path)
 
     @staticmethod

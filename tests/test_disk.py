@@ -1,13 +1,105 @@
 """Tests for disk forensics modules."""
 
+import hashlib
+import io
 import os
 import struct
+import zipfile
 
 import pytest
+from PIL import Image
 
-from src.disk.carver import FileCarver, FileSignature, SIGNATURES
+from src.disk.carver import FileCarver
 from src.disk.filesystem import FilesystemNavigator
 from src.disk.imager import DiskImager
+
+
+def make_jpeg() -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), (200, 30, 30)).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def make_png() -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), (30, 200, 30)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def make_zip() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("hello.txt", "content")
+    return buf.getvalue()
+
+
+def make_pdf() -> bytes:
+    return (
+        b"%PDF-1.4\n"
+        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
+        b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj\n"
+        b"xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n"
+        b"0000000058 00000 n \n0000000115 00000 n \n"
+        b"trailer << /Size 4 /Root 1 0 R >>\nstartxref\n190\n%%EOF"
+    )
+
+
+def _fat_dir_entry(name: bytes, size: int) -> bytes:
+    entry = bytearray(32)
+    entry[0:11] = name  # 8.3 name, space padded
+    entry[0x0B] = 0x20  # archive attribute
+    struct.pack_into("<H", entry, 0x16, (12 << 11) | (30 << 5))  # 12:30:00
+    struct.pack_into("<H", entry, 0x18, ((2024 - 1980) << 9) | (3 << 5) | 15)
+    struct.pack_into("<I", entry, 0x1C, size)
+    return bytes(entry)
+
+
+def make_fat16_image() -> bytes:
+    """FAT16 volume as formatted by real tools (vendor string in the OEM ID)."""
+    bps, spc, reserved, nfats, root_entries, fatsz16 = 512, 4, 1, 2, 512, 32
+    boot = bytearray(bps)
+    boot[3:11] = b"MSDOS5.0"
+    struct.pack_into(
+        "<HBHBHHBH",
+        boot,
+        0x0B,
+        bps,
+        spc,
+        reserved,
+        nfats,
+        root_entries,
+        0x8000,
+        0xF8,
+        fatsz16,
+    )
+    boot[0x24] = 0x80  # drive number: non-zero bytes where FAT32 keeps its FAT size
+    boot[0x26] = 0x29
+    boot[0x27:0x2B] = b"\x12\x34\x56\x78"
+    boot[0x36:0x3E] = b"FAT16   "
+    boot[510:512] = b"\x55\xaa"
+    root_offset = (reserved + nfats * fatsz16) * bps
+    image = bytearray(root_offset + root_entries * 32 + bps)
+    image[0:bps] = boot
+    image[root_offset : root_offset + 32] = _fat_dir_entry(b"README  TXT", 1234)
+    return bytes(image)
+
+
+def make_fat32_image() -> bytes:
+    """Small FAT32 volume: FAT size below 0x10000 sectors."""
+    bps, spc, reserved, nfats, fatsz32, root_cluster = 512, 1, 32, 2, 100, 2
+    boot = bytearray(bps)
+    boot[3:11] = b"mkfs.fat"
+    struct.pack_into("<HBHBHHBH", boot, 0x0B, bps, spc, reserved, nfats, 0, 0, 0xF8, 0)
+    struct.pack_into("<I", boot, 0x24, fatsz32)
+    struct.pack_into("<I", boot, 0x2C, root_cluster)
+    boot[0x52:0x5A] = b"FAT32   "
+    boot[510:512] = b"\x55\xaa"
+    root_offset = (reserved + nfats * fatsz32 + (root_cluster - 2) * spc) * bps
+    image = bytearray(root_offset + 2 * bps)
+    image[0:bps] = boot
+    image[root_offset : root_offset + 32] = _fat_dir_entry(b"EVIDENCELOG", 42)
+    return bytes(image)
 
 
 class TestDiskImager:
@@ -33,6 +125,28 @@ class TestDiskImager:
         assert dest.exists()
         assert dest.read_bytes() == source.read_bytes()
 
+    def test_source_reporting_zero_size_is_fully_copied(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Block devices report size 0 via getsize; the image must not be empty."""
+        payload = os.urandom(3 * 1024 * 1024)
+        source = tmp_path / "device.bin"
+        source.write_bytes(payload)
+        dest = tmp_path / "device.dd"
+
+        real_getsize = os.path.getsize
+        monkeypatch.setattr(
+            os.path,
+            "getsize",
+            lambda p: 0 if os.fspath(p) == str(source) else real_getsize(p),
+        )
+
+        result = DiskImager(str(source), str(dest)).acquire()
+        assert result["bytes_copied"] == len(payload)
+        assert result["source_size"] == len(payload)
+        assert result["sha256"] == hashlib.sha256(payload).hexdigest()
+        assert dest.read_bytes() == payload
+
     def test_empty_source(self, tmp_path) -> None:
         source = tmp_path / "empty.bin"
         source.write_bytes(b"")
@@ -43,7 +157,7 @@ class TestDiskImager:
 
     def test_large_block_acquisition(self, tmp_path) -> None:
         source = tmp_path / "large.bin"
-        source.write_bytes(b"\xAB" * (4 * 1024 * 1024 + 13))  # > 4MB
+        source.write_bytes(b"\xab" * (4 * 1024 * 1024 + 13))  # > 4MB
 
         dest = tmp_path / "large.dd"
         imager = DiskImager(str(source), str(dest))
@@ -53,7 +167,7 @@ class TestDiskImager:
 
     def test_cancellation(self, tmp_path) -> None:
         source = tmp_path / "cancel_source.bin"
-        source.write_bytes(b"\xBB" * (8 * 1024 * 1024))
+        source.write_bytes(b"\xbb" * (8 * 1024 * 1024))
         dest = tmp_path / "cancel.dd"
         imager = DiskImager(str(source), str(dest), verify=False)
 
@@ -96,7 +210,7 @@ class TestFileCarver:
     def test_carve_jpeg(self, tmp_path) -> None:
         image = tmp_path / "image.raw"
         # Embed a JPEG with header and footer
-        jpeg_data = b"\xff\xd8\xff" + b"\x00" * 100 + b"\xff\xd9"
+        jpeg_data = make_jpeg()
         image.write_bytes(jpeg_data * 3)  # 3 JPEGs
 
         output = tmp_path / "carved"
@@ -125,8 +239,8 @@ class TestFileCarver:
 
     def test_carve_pdf(self, tmp_path) -> None:
         image = tmp_path / "pdf_test.raw"
-        pdf_data = b"%PDF" + b"1.4 obj stream endobj" + b"\n%%EOF"
-        image.write_bytes(pdf_data)
+        pdf_data = make_pdf()
+        image.write_bytes(b"\x00" * 512 + pdf_data + b"\x00" * 512)
 
         output = tmp_path / "carved_pdf"
         carver = FileCarver(str(image), str(output))
@@ -136,11 +250,7 @@ class TestFileCarver:
 
     def test_carve_zip(self, tmp_path) -> None:
         image = tmp_path / "zip_test.raw"
-        # Minimal ZIP structure
-        zip_data = b"PK\x03\x04" + b"\x00" * 26 + b"hello.txt" + b"content"
-        eocd = b"PK\x05\x06" + b"\x00" * 16
-        full = zip_data + eocd
-        image.write_bytes(full)
+        image.write_bytes(b"\x00" * 512 + make_zip() + b"\x00" * 512)
 
         output = tmp_path / "carved_zip"
         carver = FileCarver(str(image), str(output))
@@ -149,10 +259,7 @@ class TestFileCarver:
 
     def test_carve_multiple_types(self, tmp_path) -> None:
         image = tmp_path / "multi.raw"
-        jpeg = b"\xff\xd8\xff" + b"\x00" * 50 + b"\xff\xd9"
-        png_h = b"\x89PNG\r\n\x1a\n"
-        png = png_h + b"IEND\x00\x00\x00\x00"
-        image.write_bytes(jpeg + png)
+        image.write_bytes(make_jpeg() + b"\x00" * 64 + make_png())
 
         output = tmp_path / "carved_multi"
         carver = FileCarver(str(image), str(output))
@@ -216,7 +323,7 @@ class TestFilesystemNavigator:
         image = tmp_path / "ntfs.img"
         data = bytearray(512)
         data[3:11] = b"NTFS    "
-        data[510:512] = b"\x55\xAA"
+        data[510:512] = b"\x55\xaa"
         image.write_bytes(data)
         nav = FilesystemNavigator(str(image))
         fs = nav.identify_filesystem()
@@ -226,7 +333,7 @@ class TestFilesystemNavigator:
         image = tmp_path / "fat32.img"
         data = bytearray(512)
         data[3:11] = b"FAT32   "
-        data[510:512] = b"\x55\xAA"
+        data[510:512] = b"\x55\xaa"
         image.write_bytes(data)
         nav = FilesystemNavigator(str(image))
         fs = nav.identify_filesystem()
@@ -251,7 +358,7 @@ class TestFilesystemNavigator:
 
     def test_fallback_listing(self, tmp_path) -> None:
         image = tmp_path / "fallback.img"
-        data = b"filename=\"report.pdf\" " * 10 + b"Content-Type: application/pdf"
+        data = b'filename="report.pdf" ' * 10 + b"Content-Type: application/pdf"
         image.write_bytes(data)
         nav = FilesystemNavigator(str(image))
         entries = nav.list_directory("/")
@@ -260,10 +367,28 @@ class TestFilesystemNavigator:
     def test_mbr_partition_table(self, tmp_path) -> None:
         image = tmp_path / "mbr.img"
         data = bytearray(512)
-        data[510:512] = b"\x55\xAA"
+        data[510:512] = b"\x55\xaa"
         # Partition 1: type 0x07 (NTFS)
         data[446 + 4] = 0x07
         image.write_bytes(data)
         nav = FilesystemNavigator(str(image))
         fs = nav.identify_filesystem()
         assert fs == "NTFS"
+
+    @pytest.mark.parametrize(
+        ("builder", "fs_type", "expected_name", "expected_size"),
+        [
+            (make_fat16_image, "FAT16", "README.TXT", 1234),
+            (make_fat32_image, "FAT32", "EVIDENCE.LOG", 42),
+        ],
+    )
+    def test_fat_root_directory_listing(
+        self, tmp_path, builder, fs_type, expected_name, expected_size
+    ) -> None:
+        image = tmp_path / "volume.img"
+        image.write_bytes(builder())
+        nav = FilesystemNavigator(str(image))
+        assert nav.identify_filesystem() == fs_type
+        entries = nav.list_directory("/")
+        assert [(e.name, e.size) for e in entries] == [(expected_name, expected_size)]
+        assert entries[0].modified == "2024-03-15 12:30:00"

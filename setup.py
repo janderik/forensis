@@ -30,16 +30,19 @@ setup(
         "Natural Language :: English",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Topic :: Security",
         "Topic :: System :: Archiving :: Backup",
     ],
-    python_requires=">=3.9",
+    python_requires=">=3.10",
     install_requires=requirements,
-    packages=find_packages(where="src"),
-    package_dir={"": "src"},
+    # The code lives in src/ but is installed as the "forensis" package,
+    # which is what the console script below imports.
+    packages=["forensis"] + [f"forensis.{pkg}" for pkg in find_packages(where="src")],
+    package_dir={"forensis": "src"},
     entry_points={
         "console_scripts": [
             "forensis=forensis.cli:cli",

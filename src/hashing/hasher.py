@@ -9,9 +9,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,9 @@ class Hasher:
         """
         algo = algorithm.lower()
         if algo not in self.SUPPORTED_ALGORITHMS:
-            raise ValueError(f"Unsupported algorithm: {algorithm}. Supported: {self.SUPPORTED_ALGORITHMS}")
+            raise ValueError(
+                f"Unsupported algorithm: {algorithm}. Supported: {self.SUPPORTED_ALGORITHMS}"
+            )
 
         hasher_fn = getattr(hashlib, algo.replace("-", ""))()
         try:
@@ -168,7 +170,9 @@ class Hasher:
             if format == "csv":
                 f.write("File,Size,SHA256,SHA1,MD5\n")
                 for r in results:
-                    f.write(f"{r.file_path},{r.file_size},{r.sha256},{r.sha1},{r.md5}\n")
+                    f.write(
+                        f"{r.file_path},{r.file_size},{r.sha256},{r.sha1},{r.md5}\n"
+                    )
             else:
                 # NSRL-style hash set
                 f.write("# Forensis Hash Set\n")

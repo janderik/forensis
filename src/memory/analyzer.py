@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -23,6 +24,8 @@ class MemoryAnalyzer:
     """Orchestrates memory analysis across process, network, and module enumeration."""
 
     def __init__(self, dump_path: str) -> None:
+        if not os.path.isfile(dump_path):
+            raise FileNotFoundError(f"Memory dump not found: {dump_path}")
         self.dump_path = dump_path
         self._data: Optional[bytes] = None
         self._size: int = 0
@@ -97,12 +100,14 @@ class MemoryAnalyzer:
                 pos = chunk.find(sig)
                 while pos != -1:
                     abs_pos = offset + pos
-                    modules.append({
-                        "offset": hex(abs_pos),
-                        "signature": sig.hex(),
-                        "description": f"Potential {desc} module",
-                        "size": self._size - abs_pos,
-                    })
+                    modules.append(
+                        {
+                            "offset": hex(abs_pos),
+                            "signature": sig.hex(),
+                            "description": f"Potential {desc} module",
+                            "size": self._size - abs_pos,
+                        }
+                    )
                     pos = chunk.find(sig, pos + 1)
             offset += chunk_size
 

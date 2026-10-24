@@ -1,11 +1,10 @@
 """Tests for memory analysis modules."""
 
 import struct
-from datetime import datetime, timezone
 
 import pytest
 
-from src.memory.analyzer import MemoryAnalyzer, MemoryAnalysisResult
+from src.memory.analyzer import MemoryAnalysisResult, MemoryAnalyzer
 from src.memory.network import NetworkConnections
 from src.memory.processes import ProcessList
 
@@ -35,9 +34,9 @@ class TestProcessList:
         assert any("explorer.exe" in name.lower() for name in names if name)
 
     def test_pid_extraction_heuristic(self) -> None:
-        data = bytearray(256)
+        data = bytearray(0x200)  # large enough to hold the name at +0x170
         struct.pack_into("<I", data, 0, 1234)  # Potential PID
-        struct.pack_into("<I", data, 8, 567)   # Potential PPID
+        struct.pack_into("<I", data, 8, 567)  # Potential PPID
         data[0x170:0x178] = b"cmd.exe\x00"
         pl = ProcessList(bytes(data))
         procs = pl.list_processes()
@@ -75,7 +74,7 @@ class TestNetworkConnections:
         data[0:4] = b"\xc0\xa8\x01\x01"  # 192.168.1.1
         data[4:8] = b"\x0a\x00\x00\x01"  # 10.0.0.1
         struct.pack_into("<H", data, 16, 8080)  # local port
-        struct.pack_into("<H", data, 18, 443)   # remote port
+        struct.pack_into("<H", data, 18, 443)  # remote port
         data[24] = 4  # ESTABLISHED
 
         nc = NetworkConnections(bytes(data))
@@ -94,10 +93,12 @@ class TestNetworkConnections:
         data = b"999.999.999.999:12345"
         nc = NetworkConnections(data)
         conns = nc.list_connections()
-        assert all(
-            all(0 <= int(p) <= 255 for p in c["local_ip"].split("."))
-            for c in conns
-        ) or len(conns) == 0
+        assert (
+            all(
+                all(0 <= int(p) <= 255 for p in c["local_ip"].split(".")) for c in conns
+            )
+            or len(conns) == 0
+        )
 
     def test_tcp_state_mapping(self) -> None:
         assert NetworkConnections._tcp_state(4) == "ESTABLISHED"
@@ -157,7 +158,7 @@ class TestMemoryAnalyzer:
         assert len(r1.processes) == len(r2.processes)
 
     def test_permission_error(self, tmp_path) -> None:
-        import stat
+
         dump_file = tmp_path / "noperm.raw"
         dump_file.write_bytes(b"\x00")
         # Can't easily test permission on Windows, so just verify the method is called

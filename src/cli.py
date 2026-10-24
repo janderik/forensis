@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 from typing import List, Optional
 
@@ -76,7 +75,9 @@ def processes(dump: str) -> None:
         click.echo(f"{'PID':<8} {'PPID':<8} {'Name':<25} {'Offset':<20}")
         click.echo("-" * 65)
         for p in procs[:100]:
-            click.echo(f"{p['pid']:<8} {p['ppid']:<8} {p['name']:<25} {p.get('offset', ''):<20}")
+            click.echo(
+                f"{p['pid']:<8} {p['ppid']:<8} {p['name']:<25} {p.get('offset', ''):<20}"
+            )
         click.echo(f"\nTotal: {len(procs)} processes (showing up to 100)")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -93,38 +94,50 @@ def network(dump: str) -> None:
         if not conns:
             click.echo("No network connections found in dump.")
             return
-        click.echo(f"{'Protocol':<10} {'Local IP':<18} {'Port':<8} {'Remote IP':<18} {'Port':<8} {'State':<15}")
+        click.echo(
+            f"{'Protocol':<10} {'Local IP':<18} {'Port':<8} {'Remote IP':<18} {'Port':<8} {'State':<15}"
+        )
         click.echo("-" * 85)
         for c in conns[:50]:
-            click.echo(f"{c['protocol']:<10} {c['local_ip']:<18} {c['local_port']:<8} {c['remote_ip']:<18} {c['remote_port']:<8} {c['state']:<15}")
+            click.echo(
+                f"{c['protocol']:<10} {c['local_ip']:<18} {c['local_port']:<8} {c['remote_ip']:<18} {c['remote_port']:<8} {c['state']:<15}"
+            )
         click.echo(f"\nTotal: {len(conns)} connections (showing up to 50)")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
 
-@memory.command()
+@memory.command("analyze")
 @click.argument("dump", type=click.Path(exists=True, readable=True))
 @click.option("--json", "json_output", is_flag=True, help="Output as JSON")
-def analyze(dump: str, json_output: bool) -> None:
+def memory_analyze(dump: str, json_output: bool) -> None:
     """Run full analysis on a memory dump (processes, network, modules)."""
     try:
         analyzer = MemoryAnalyzer(dump)
         result = analyzer.analyze_all()
         if json_output:
-            click.echo(json.dumps({
-                "processes": result.processes[:100],
-                "connections": result.connections[:50],
-                "modules": result.modules[:50],
-                "errors": result.errors,
-            }, indent=2, default=str))
+            click.echo(
+                json.dumps(
+                    {
+                        "processes": result.processes[:100],
+                        "connections": result.connections[:50],
+                        "modules": result.modules[:50],
+                        "errors": result.errors,
+                    },
+                    indent=2,
+                    default=str,
+                )
+            )
         else:
             click.echo(f"\n=== Processes ({len(result.processes)}) ===")
             for p in result.processes[:30]:
                 click.echo(f"  [{p['pid']}] {p['name']} (PPID: {p['ppid']})")
             click.echo(f"\n=== Network Connections ({len(result.connections)}) ===")
             for c in result.connections[:20]:
-                click.echo(f"  {c['protocol']} {c['local_ip']}:{c['local_port']} -> {c['remote_ip']}:{c['remote_port']} [{c['state']}]")
+                click.echo(
+                    f"  {c['protocol']} {c['local_ip']}:{c['local_port']} -> {c['remote_ip']}:{c['remote_port']} [{c['state']}]"
+                )
             click.echo(f"\n=== Modules ({len(result.modules)}) ===")
             for m in result.modules[:20]:
                 click.echo(f"  {m['description']} @ {m['offset']}")
@@ -151,7 +164,9 @@ def disk() -> None:
 @click.argument("destination", type=click.Path())
 @click.option("--log", "log_path", type=click.Path(), help="Path to acquisition log")
 @click.option("--no-verify", is_flag=True, help="Skip post-acquisition verification")
-def image(source: str, destination: str, log_path: Optional[str], no_verify: bool) -> None:
+def image(
+    source: str, destination: str, log_path: Optional[str], no_verify: bool
+) -> None:
     """Create a forensic disk image (dd-style bit-for-bit copy)."""
     try:
         imager = DiskImager(
@@ -182,12 +197,25 @@ def image(source: str, destination: str, log_path: Optional[str], no_verify: boo
 
 @disk.command()
 @click.argument("image", type=click.Path(exists=True, readable=True))
-@click.option("--output", "-o", default="carved", show_default=True, help="Output directory for carved files")
-@click.option("--types", "-t", default="", help="Comma-separated file types to carve (e.g. jpg,png,pdf)")
+@click.option(
+    "--output",
+    "-o",
+    default="carved",
+    show_default=True,
+    help="Output directory for carved files",
+)
+@click.option(
+    "--types",
+    "-t",
+    default="",
+    help="Comma-separated file types to carve (e.g. jpg,png,pdf)",
+)
 def carve(image: str, output: str, types: str) -> None:
     """Carve files from a disk image by magic byte signatures."""
     try:
-        type_list = [t.strip() for t in types.split(",") if t.strip()] if types else None
+        type_list = (
+            [t.strip() for t in types.split(",") if t.strip()] if types else None
+        )
         carver = FileCarver(image, output_dir=output)
         results = carver.carve_all(types=type_list)
         if not results:
@@ -196,7 +224,9 @@ def carve(image: str, output: str, types: str) -> None:
         click.echo(f"{'Type':<12} {'Size':<12} {'Offset':<20} {'File':<30}")
         click.echo("-" * 75)
         for r in results:
-            click.echo(f"{r['file_type']:<12} {r['size']:<12} {r['offset']:<20} {r['path']:<30}")
+            click.echo(
+                f"{r['file_type']:<12} {r['size']:<12} {r['offset']:<20} {r['path']:<30}"
+            )
         click.echo(f"\nTotal: {carver.carved_count} files ({carver.total_size} bytes)")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -238,7 +268,9 @@ def timeline() -> None:
 
 @timeline.command()
 @click.argument("image", type=click.Path(exists=True, readable=True))
-@click.option("--output", "-o", default="timeline.csv", show_default=True, help="Output CSV path")
+@click.option(
+    "--output", "-o", default="timeline.csv", show_default=True, help="Output CSV path"
+)
 def build(image: str, output: str) -> None:
     """Build a forensic timeline from a disk image."""
     try:
@@ -249,17 +281,25 @@ def build(image: str, output: str) -> None:
             return
         builder.export_csv(entries, output)
         click.echo(f"Timeline built: {len(entries)} entries exported to {output}")
-        click.echo(f"  Time span: {(entries[-1].timestamp_epoch - entries[0].timestamp_epoch) / 3600:.1f} hours")
+        click.echo(
+            f"  Time span: {(entries[-1].timestamp_epoch - entries[0].timestamp_epoch) / 3600:.1f} hours"
+        )
         click.echo(f"  Sources: {len(set(e.source for e in entries))}")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
 
-@timeline.command()
+@timeline.command("analyze")
 @click.argument("csv_file", type=click.Path(exists=True, readable=True))
-@click.option("--output", "-o", default="anomalies.json", show_default=True, help="Output JSON path")
-def analyze(csv_file: str, output: str) -> None:
+@click.option(
+    "--output",
+    "-o",
+    default="anomalies.json",
+    show_default=True,
+    help="Output JSON path",
+)
+def timeline_analyze(csv_file: str, output: str) -> None:
     """Analyze a timeline CSV for anomalies."""
     try:
         entries = TimelineBuilder.load_csv(csv_file)
@@ -273,25 +313,32 @@ def analyze(csv_file: str, output: str) -> None:
         click.echo(f"  Time span: {report.time_span_hours:.1f} hours")
 
         for anomaly in report.anomalies:
-            click.echo(f"\n  [{anomaly.severity.upper()}] {anomaly.type}: {anomaly.description}")
+            click.echo(
+                f"\n  [{anomaly.severity.upper()}] {anomaly.type}: {anomaly.description}"
+            )
 
         with open(output, "w") as f:
-            json.dump({
-                "total_events": report.total_events,
-                "time_span_hours": report.time_span_hours,
-                "statistics": report.statistics,
-                "source_breakdown": report.source_breakdown,
-                "event_type_breakdown": report.event_type_breakdown,
-                "anomalies": [
-                    {
-                        "type": a.type,
-                        "severity": a.severity,
-                        "description": a.description,
-                        "details": a.details,
-                    }
-                    for a in report.anomalies
-                ],
-            }, f, indent=2, default=str)
+            json.dump(
+                {
+                    "total_events": report.total_events,
+                    "time_span_hours": report.time_span_hours,
+                    "statistics": report.statistics,
+                    "source_breakdown": report.source_breakdown,
+                    "event_type_breakdown": report.event_type_breakdown,
+                    "anomalies": [
+                        {
+                            "type": a.type,
+                            "severity": a.severity,
+                            "description": a.description,
+                            "details": a.details,
+                        }
+                        for a in report.anomalies
+                    ],
+                },
+                f,
+                indent=2,
+                default=str,
+            )
         click.echo(f"\nAnomalies exported to {output}")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -302,13 +349,24 @@ def analyze(csv_file: str, output: str) -> None:
 
 
 @cli.command()
-@click.argument("files", nargs=-1, type=click.Path(exists=True, readable=True), required=True)
+@click.argument(
+    "files", nargs=-1, type=click.Path(exists=True, readable=True), required=True
+)
 @click.option("--sha256", is_flag=True, help="Compute SHA-256 hash")
 @click.option("--sha1", is_flag=True, help="Compute SHA-1 hash")
 @click.option("--md5", is_flag=True, help="Compute MD5 hash")
 @click.option("--output", "-o", type=click.Path(), help="Output file for hash results")
-@click.option("--verify", type=str, help="Verify file against a hash (format: algorithm:hash)")
-def hash(files: List[str], sha256: bool, sha1: bool, md5: bool, output: Optional[str], verify: Optional[str]) -> None:
+@click.option(
+    "--verify", type=str, help="Verify file against a hash (format: algorithm:hash)"
+)
+def hash(
+    files: List[str],
+    sha256: bool,
+    sha1: bool,
+    md5: bool,
+    output: Optional[str],
+    verify: Optional[str],
+) -> None:
     """Compute cryptographic hashes of evidence files."""
     algos = []
     if sha256 or not (sha1 or md5):
@@ -368,10 +426,31 @@ def report() -> None:
 @click.option("--case-id", "case_id", default="", help="Case identifier")
 @click.option("--examiner", default="", help="Examiner name")
 @click.option("--description", default="", help="Case description")
-@click.option("--findings", type=click.Path(exists=True, readable=True), help="JSON file with findings array")
-@click.option("--hash", "hash_str", multiple=True, help="Hash in format algorithm:value (can be repeated)")
-@click.option("--output", "-o", default="forensic_report.html", show_default=True, help="Output file path")
-@click.option("--format", "fmt", type=click.Choice(["html", "json", "both"]), default="html", help="Output format")
+@click.option(
+    "--findings",
+    type=click.Path(exists=True, readable=True),
+    help="JSON file with findings array",
+)
+@click.option(
+    "--hash",
+    "hash_str",
+    multiple=True,
+    help="Hash in format algorithm:value (can be repeated)",
+)
+@click.option(
+    "--output",
+    "-o",
+    default="forensic_report.html",
+    show_default=True,
+    help="Output file path",
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["html", "json", "both"]),
+    default="html",
+    help="Output format",
+)
 def generate(
     case_name: str,
     case_id: str,

@@ -1,9 +1,6 @@
 """Tests for timeline analysis modules."""
 
 import csv
-import os
-import struct
-from datetime import datetime, timezone
 
 import pytest
 
@@ -37,9 +34,9 @@ class TestTimelineBuilder:
     def test_build_multiple_sources(self, tmp_path) -> None:
         image = tmp_path / "multi_src.img"
         data = (
-            b"2024-01-01 00:00:00 " * 5 +
-            b"2024-06-15 12:30:00 " * 3 +
-            b"2025-12-31 23:59:59 " * 2
+            b"2024-01-01 00:00:00 " * 5
+            + b"2024-06-15 12:30:00 " * 3
+            + b"2025-12-31 23:59:59 " * 2
         )
         image.write_bytes(data)
         builder = TimelineBuilder(str(image))
@@ -76,8 +73,21 @@ class TestTimelineBuilder:
         csv_path = tmp_path / "load_test.csv"
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["Timestamp", "Epoch", "Source", "Type", "Description", "Path", "Size", "Integrity"])
-            writer.writerow(["2024-01-01 UTC", "1704067200", "test", "event", "desc", "", "0", "ok"])
+            writer.writerow(
+                [
+                    "Timestamp",
+                    "Epoch",
+                    "Source",
+                    "Type",
+                    "Description",
+                    "Path",
+                    "Size",
+                    "Integrity",
+                ]
+            )
+            writer.writerow(
+                ["2024-01-01 UTC", "1704067200", "test", "event", "desc", "", "0", "ok"]
+            )
 
         entries = TimelineBuilder.load_csv(str(csv_path))
         assert len(entries) == 1
@@ -117,7 +127,13 @@ class TestTimelineAnalyzer:
 
     def test_single_entry_no_anomalies(self) -> None:
         entries = [
-            TimelineEntry(timestamp="2024-01-01", timestamp_epoch=1704067200.0, source="test", event_type="event", description=""),
+            TimelineEntry(
+                timestamp="2024-01-01",
+                timestamp_epoch=1704067200.0,
+                source="test",
+                event_type="event",
+                description="",
+            ),
         ]
         analyzer = TimelineAnalyzer(entries)
         report = analyzer.analyze()
@@ -126,8 +142,20 @@ class TestTimelineAnalyzer:
 
     def test_time_gap_detection(self) -> None:
         entries = [
-            TimelineEntry(timestamp="2024-01-01 00:00:00", timestamp_epoch=1704067200.0, source="a", event_type="a", description="first"),
-            TimelineEntry(timestamp="2024-01-03 00:00:00", timestamp_epoch=1704240000.0, source="b", event_type="b", description="second"),
+            TimelineEntry(
+                timestamp="2024-01-01 00:00:00",
+                timestamp_epoch=1704067200.0,
+                source="a",
+                event_type="a",
+                description="first",
+            ),
+            TimelineEntry(
+                timestamp="2024-01-03 00:00:00",
+                timestamp_epoch=1704240000.0,
+                source="b",
+                event_type="b",
+                description="second",
+            ),
         ]
         analyzer = TimelineAnalyzer(entries)
         report = analyzer.analyze()
@@ -186,7 +214,13 @@ class TestTimelineAnalyzer:
 
     def test_statistics_in_report(self) -> None:
         entries = [
-            TimelineEntry(timestamp=f"2024-01-0{d}", timestamp_epoch=1704067200.0 + d * 86400, source="src", event_type="evt", description="")
+            TimelineEntry(
+                timestamp=f"2024-01-0{d}",
+                timestamp_epoch=1704067200.0 + d * 86400,
+                source="src",
+                event_type="evt",
+                description="",
+            )
             for d in range(1, 6)
         ]
         analyzer = TimelineAnalyzer(entries)
@@ -199,21 +233,68 @@ class TestTimelineAnalyzer:
     def test_outlier_detection(self) -> None:
         base = 1704067200.0
         entries = [
-            TimelineEntry(timestamp="t", timestamp_epoch=base + i * 100, source="s", event_type="e", description=f"e{i}")
+            TimelineEntry(
+                timestamp="t",
+                timestamp_epoch=base + i * 100,
+                source="s",
+                event_type="e",
+                description=f"e{i}",
+            )
             for i in range(20)
         ]
         # Add an outlier
-        entries.append(TimelineEntry(timestamp="outlier", timestamp_epoch=base + 86400 * 30, source="s", event_type="e", description="outlier"))
+        entries.append(
+            TimelineEntry(
+                timestamp="outlier",
+                timestamp_epoch=base + 86400 * 30,
+                source="s",
+                event_type="e",
+                description="outlier",
+            )
+        )
         analyzer = TimelineAnalyzer(entries)
         report = analyzer.analyze()
         outliers = [a for a in report.anomalies if a.type == "outlier_cluster"]
         assert len(outliers) > 0
 
+    def test_no_outliers_in_evenly_spaced_timeline(self) -> None:
+        base = 1704067200.0
+        entries = [
+            TimelineEntry(
+                timestamp="t",
+                timestamp_epoch=base + i * 3600,
+                source="s",
+                event_type="e",
+                description=f"e{i}",
+            )
+            for i in range(48)
+        ]
+        report = TimelineAnalyzer(entries).analyze()
+        assert not [a for a in report.anomalies if a.type == "outlier_cluster"]
+
     def test_source_breakdown(self) -> None:
         entries = [
-            TimelineEntry(timestamp="t", timestamp_epoch=100.0, source="syslog", event_type="log", description=""),
-            TimelineEntry(timestamp="t", timestamp_epoch=200.0, source="syslog", event_type="log", description=""),
-            TimelineEntry(timestamp="t", timestamp_epoch=300.0, source="security", event_type="log", description=""),
+            TimelineEntry(
+                timestamp="t",
+                timestamp_epoch=100.0,
+                source="syslog",
+                event_type="log",
+                description="",
+            ),
+            TimelineEntry(
+                timestamp="t",
+                timestamp_epoch=200.0,
+                source="syslog",
+                event_type="log",
+                description="",
+            ),
+            TimelineEntry(
+                timestamp="t",
+                timestamp_epoch=300.0,
+                source="security",
+                event_type="log",
+                description="",
+            ),
         ]
         analyzer = TimelineAnalyzer(entries)
         report = analyzer.analyze()
